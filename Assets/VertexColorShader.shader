@@ -6,6 +6,7 @@ Shader "Custom/VertexColorShader" {
     SubShader 
     {
         Tags { "RenderType"="Opaque"}       
+        Cull Off
         pass
         {
             CGPROGRAM

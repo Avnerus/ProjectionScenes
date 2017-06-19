@@ -15,6 +15,8 @@ public class ProjectionScenesEditor : Editor
 
     private Vector2 _rotation = Vector2.zero;
 
+    private float _sceneThreshold;
+
     void OnEnable () {
         _previewRenderUtility = new PreviewRenderUtility (false);
         _previewRenderUtility.m_CameraFieldOfView = 30f;
@@ -25,6 +27,7 @@ public class ProjectionScenesEditor : Editor
         ProjectionScenes t = target as ProjectionScenes;
 
         _previewObject = t.gameObject;
+        _sceneThreshold = t.sceneThreshold;
 
         Shader vertexColorShader = Shader.Find("Custom/VertexColorShader");
 
@@ -42,6 +45,7 @@ public class ProjectionScenesEditor : Editor
     public override bool HasPreviewGUI () {
         return true;
     }
+
     public override void OnInteractivePreviewGUI (Rect r, GUIStyle background) {
 
         _previewRenderUtility.BeginPreview (r, background);
@@ -99,28 +103,38 @@ public class ProjectionScenesEditor : Editor
             List<Vector3> vertices = new List<Vector3>();;
             List<int> indices = new List<int>();
             List<Color> colors = new List<Color>();
-            //Vector3[] normals;
+            List<Vector3> normals = new List<Vector3>();
 
-            int index = 0;
+            int vertexIndex = 0;
 
             _unfoldingMesh = new Mesh();
             string dataAsJson = File.ReadAllText(filePath);
+
             JObject root = JObject.Parse(dataAsJson);
+            // Arrange the faces in a dictionary
+            //
+            Dictionary<int, JObject> faces = new Dictionary<int,JObject>();
+            Dictionary<int, bool> processed = new Dictionary<int,bool>();
+
             foreach (JObject face in root["faces"].Children<JObject>()) {
-                foreach (JObject vertex in face["vtx"].Children<JObject>()) {
-                    Vector3 vector = vertex.ToObject<Vector3>();
-                    vertices.Add(vector);
-                    indices.Add(index);
-                    colors.Add(Color.white);
-                    index++;
-                }
+                int faceId = face["id"].ToObject<int>();
+                faces[faceId] = face;
+                processed[faceId] = false;
             }
 
-            Debug.Log(index + " Vertices");
+            // Just start with 0
+            ProcessFace(faces[0], faces, processed, ref vertexIndex, Random.ColorHSV(), vertices, indices, colors, normals );
+            /*
+                float colorFactor = (40 * (faceId + 1)) / 255.0f;
+                Color faceColor = new Color(colorFactor, colorFactor, colorFactor, 1.0f);
+            }*/
+
+            Debug.Log(vertexIndex + " Vertices");
 
             _unfoldingMesh.SetVertices(vertices);
             _unfoldingMesh.SetColors(colors);
             _unfoldingMesh.SetIndices(indices.ToArray(), MeshTopology.Quads, 0); 
+            _unfoldingMesh.SetNormals(normals);
 
             Debug.Log("unfolding mesh ready");
         }
@@ -129,6 +143,47 @@ public class ProjectionScenesEditor : Editor
         }
 
 
+    }
+
+    void ProcessFace(
+            JObject face, 
+            Dictionary<int, JObject> faces, 
+            Dictionary<int, bool> processed, 
+            ref int vertexIndex,
+            Color currentColor,
+            List<Vector3> vertices, 
+            List<int> indices, 
+            List<Color> colors, 
+            List<Vector3> normals
+        ) {
+        int faceId = face["id"].ToObject<int>();
+        if (!processed[faceId]) {
+            Debug.Log("Processing face " + faceId);
+            processed[faceId] = true;
+            // Process vertices
+            Vector3 normal = face["normal"].ToObject<Vector3>();
+            foreach (JObject vertex in face["vtx"].Children<JObject>()) {
+                Vector3 vector = vertex.ToObject<Vector3>();
+                vertices.Add(vector);
+                indices.Add(vertexIndex);
+                colors.Add(currentColor);
+                normals.Add(normal);
+                vertexIndex++;
+            }
+            foreach (JObject neighbor in face["neighbors"].Children<JObject>()) {
+                int neighborId = neighbor["id"].ToObject<int>();
+                JObject neighborFace = faces[neighborId];
+                // Is it a new scene?
+                Vector3 neighborNormal = neighborFace["normal"].ToObject<Vector3>();
+                float angle = Vector3.Angle(normal, neighborNormal);
+                Debug.Log("Neighbor angle: " + angle);
+                if (angle > _sceneThreshold) {
+                    currentColor = Random.ColorHSV();
+                }
+
+                ProcessFace(neighborFace, faces, processed, ref vertexIndex, currentColor, vertices, indices, colors, normals);
+            }
+        }
     }
 
     /*
